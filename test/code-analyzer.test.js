@@ -1,12 +1,69 @@
 import assert from 'assert';
-import {symbolic_substitution} from '../src/js/code-analyzer';
+import {symbolic_substitution,parseCode,reset,makeInputArray,setArgEnv,
+    handleFunctionDeclaration,handleIfStatement,handleWhileStatement,handleBinaryExpressionVal,newCode,argEnv} from '../src/js/code-analyzer';
 
-/*
-return 1; //green
-    }
-    else return 2; //red
-}
-*/
+
+describe('Test handleFunctionDeclaration', () => {
+    it('test handleFunctionDeclaration', () => {
+        let str='function foo(x, y, z){\nlet a = x + 1;\nlet b = a + y;\n\nif (b < z) {\na = a + 5;\nreturn x + y + z +a;\n} else {\nb = b + x + 5;\nreturn x + y + z +b;\n}\n}';
+        reset();
+        makeInputArray('1,2,3');
+        let code=parseCode(str).body[0],
+            expectedNewCodeAraay=
+            [{Line:'function foo(x,y,z)',Color: 0}, {Line:'{',Color: 0}, {Line:'if (x + 1 + y < z)',Color: 2}, {Line:'{',Color: 0},
+                {Line:'return x + y + z + (x + 1 + 5) ;',Color: 0}, {Line:'}',Color: 0}, {Line:'else ',Color: 0}, {Line:'{',Color: 0}, {Line:'return x + y + z + (x + 1 + y + x + 5) ;',Color: 0},
+                {Line:'}',Color: 0}, {Line:'}',Color: 0}];
+        let ans=handleFunctionDeclaration(code,{});
+
+        assert.deepEqual(ans,{});
+        assert.deepEqual(newCode,expectedNewCodeAraay);
+        assert.deepEqual(argEnv,{'x':1,'y':2,'z':3});
+    });
+
+});
+
+describe('Test handleIfStatement', () => {
+    it('test handleIfStatement', () => {
+        let str='if (x[a]>0) y = x[a]+a;';
+        reset();
+        setArgEnv({'x':'[-1,100,4]'});
+        let code=parseCode(str).body[0],
+            expectedNewCodeAraay= [{Line:'if (x[1] > 0)',Color: 1}];
+        let ans=handleIfStatement(code,{'a':'1','y':'0'});
+        assert.deepEqual(ans,{'a': '1', 'y':null});
+        assert.deepEqual(newCode,expectedNewCodeAraay);
+    });
+
+});
+
+
+describe('Test handleWhileStatement', () => {
+    it('test handleWhileStatement', () => {
+        let str='while (x[y] > 1)\nx[y]=(y+a)*2;';
+        reset();
+        setArgEnv({'x':'[-1,100,4]'});
+        let code=parseCode(str).body[0],
+            expectedNewCodeAraay= [{Line:'while (x[0] > 1)',Color: 0},{Line :'x[0]=(0 + 1) * 2;', Color: 0}];
+        let ans=handleWhileStatement(code,{'a':'1','y':'0'});
+        assert.deepEqual(ans,{'a': '1', 'y':'0'});
+        assert.deepEqual(newCode,expectedNewCodeAraay);
+    });
+
+});
+
+describe('Test handleBinaryExpressionVal', () => {
+    it('test handleBinaryExpressionVal', () => {
+        let str='(x+2)/a';
+        reset();
+        setArgEnv({'x':'3'});
+        let code=parseCode(str).body[0].expression;
+        let ans=handleBinaryExpressionVal(code,{'a':'4','y':'0'});
+        assert.deepEqual(ans,'(x + 2) / 4');
+    });
+});
+
+
+
 describe('Test 1', () => {
     it('test 1', () => {
         assert.deepEqual(

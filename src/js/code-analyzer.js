@@ -1,7 +1,8 @@
 import * as escodegen from 'escodegen';
 import * as esprima from 'esprima';
 
-export {parseCode,symbolic_substitution};
+export {parseCode,symbolic_substitution,reset,makeInputArray,setArgEnv,
+    handleFunctionDeclaration,handleIfStatement,handleWhileStatement,handleBinaryExpressionVal,newCode,argEnv};
 
 const parseCode = (codeToParse) => {
     return esprima.parseScript(codeToParse);
@@ -42,6 +43,13 @@ let paramArray=[];
 let argEnv={};
 let calcParam=false;
 let envIfNeed=null;
+
+//for testing
+function setArgEnv(env){
+    argEnv=env;
+}
+
+
 function reset(){
     newCode=[];
     inputArray=[];
