@@ -1,33 +1,36 @@
 import $ from 'jquery';
-import {symbolic_substitution} from './code-analyzer';
+import {makeGraph} from './code-analyzer';
+
+import * as flowchart from 'flowchart.js';
 
 $(document).ready(function () {
     $('#codeSubmissionButton').click(() => {
         let codeToParse = $('#codePlaceholder').val();
         let input= $('#inputPlaceholder').val();
-        var theDiv = document.getElementById('parsedCode');
-        let dic=symbolic_substitution(codeToParse,input);
-        theDiv.innerHTML=enterLine(dic);
+
+        let ans=makeGraph(codeToParse,input);
+        var theDiv = document.getElementById('diagram');
+        //theDiv.innerHTML=ans.replace(/\n/g, '<br />');
+        theDiv.innerHTML='';
+        showDiagram(ans);
     });
 });
-
-function enterLine(dic){
-    let ans='';
-    let tabs=0;
-    for (var i = 0; i < dic.length; i++) {
-        if (dic[i].Line.includes('}')) tabs--;
-        ans=actualLine(dic,i,ans,tabs);
-        if (dic[i].Line.includes('{')) tabs++;
-
-    }
-    return ans;
-}
-function actualLine(dic,i,ans,tabs){
-    for (let j=0; j<tabs; j++) {
-        ans=ans+'<span>&nbsp;&nbsp;&nbsp;</span>';
-    }
-    if (dic[i].Color===0) ans=ans+'<span>'+dic[i].Line+'</span><br>';
-    else if(dic[i].Color===1) ans=ans+'<span style="color:green;">'+dic[i].Line+'</span><br>';
-    else ans=ans+'<span style="color:red;">'+dic[i].Line+'</span><br>';
-    return ans;
+function showDiagram(ans){
+    let diagram=flowchart.parse(ans);
+    diagram.drawSVG('diagram', {
+        'x': 0, 'y': 0,
+        'line-width': 3, 'line-length': 50,
+        'text-margin': 10,
+        'font-size': 14, 'font-color': 'black',
+        'line-color': 'black',
+        'element-color': 'black',
+        'fill': 'white',
+        'yes-text': 'T',
+        'no-text': 'F',
+        'arrow-end': 'block',
+        'scale': 1,
+        'flowstate' : {
+            'right-path' : {'fill' : '#58C4A3'}
+        }
+    });
 }

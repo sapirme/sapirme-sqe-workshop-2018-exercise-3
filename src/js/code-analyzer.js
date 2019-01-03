@@ -1,31 +1,26 @@
 import * as escodegen from 'escodegen';
 import * as esprima from 'esprima';
 
-export {parseCode,symbolic_substitution,reset,makeInputArray,setArgEnv,
-    handleFunctionDeclaration,handleIfStatement,handleWhileStatement,handleBinaryExpressionVal,newCode,argEnv};
+
+export {parseCode,makeGraph,handleReturnStatement,getGraph,getCurrentName,handleBlockStatement,
+    handleExpressionStatement,handleIfStatement,handleWhileStatement,
+    reset,handleVariableDeclaration,getCurrentStr};
 
 const parseCode = (codeToParse) => {
     return esprima.parseScript(codeToParse);
 };
 
-function createCodeLine(line,color){
-    return{
-        Line: line,
-        Color: color
-    };
-}
 
 const func={
-    'FunctionDeclaration' : handleFunctionDeclaration,
     'BlockStatement': handleBlockStatement,
     'ExpressionStatement' : handleExpressionStatement,
     'AssignmentExpression' : handleAssignmentExpression,
     'IfStatement' :handleIfStatement,
     'VariableDeclaration' : handleVariableDeclaration,
-    'VariableDeclarator' : handleVariableDeclarator,
     'ReturnStatement' : handleReturnStatement,
     'WhileStatement' : handleWhileStatement
 };
+
 
 const val={
     'Literal': handleLiteralVal,
@@ -37,103 +32,129 @@ const val={
     'LogicalExpression' :handleLogicalExpression
 };
 
-let newCode=[];
-let inputArray=[];
-let paramArray=[];
-let argEnv={};
-let calcParam=false;
-let envIfNeed=null;
+let graph;
+let index;
+let indexName;
+let currentName;
+let currentStr;
+let beforeName;
 
-//for testing
-function setArgEnv(env){
-    argEnv=env;
-}
+function getGraph(){return graph;}
+function getCurrentStr() {return currentStr;}
+function getCurrentName() {return currentName;}
 
-
-function reset(){
-    newCode=[];
-    inputArray=[];
-    paramArray=[];
-    argEnv={};
-    calcParam=false;
-    envIfNeed=null;
-}
-function makeInputArray(input){
-    if (input!=='') {
-        let values = parseCode(input).body[0].expression;
-        if (values.type === 'SequenceExpression'){
-            let array = values.expressions;
-            for (let i = 0; i < array.length; i++) {
-                inputArray.push(escodegen.generate(array[i]));
-            }
-        }
-        else{
-            inputArray.push(escodegen.generate(values));
-        }
-    }
+function createVertex(n,ispass,isCond,partOfCond){
+    return{name: n, isPass: ispass,
+        isCond:isCond,partOfCond:partOfCond};
 }
 
-function symbolic_substitution(myCode,input){
-    let code = parseCode(myCode);
-    reset();
-    makeInputArray(input);
-    let env={};
-    for (let i=0; i<code.body.length; i++ ){
-        env=func[code.body[i].type](code.body[i],env);
-    }
-    return newCode;
-}
-function makeArgEnv(){
-    for (let i=0; i< inputArray.length; i++ ){
-        argEnv[paramArray[i]]= inputArray[i];
-    }
-}
-function handleFunctionDeclaration(code, env){
-    let funcEnv=Object.assign({}, env);
-    let params='';
-    for (let i=0; i<code.params.length; i++){
-        paramArray.push(escodegen.generate(code.params[i]));//code.params[i].name);
-        //funcEnv[code.params[i].name]= null;
-        params=params+code.params[i].name+',';
-    }
-    makeArgEnv();
-    params=params.substr(0, params.length-1);
-    newCode.push(createCodeLine('function '+escodegen.generate(code.id)+'('+params+')',0));
-    func[code.body.type](code.body,funcEnv);
-    return env;
-}
-
-function handleBlockStatement(code, env){
-    newCode.push(createCodeLine('{',0));
-    for (let i=0; i<code.body.length; i++){
-        env=func[code.body[i].type](code.body[i],env);
-    }
-    newCode.push(createCodeLine('}',0));
-    return env;
-}
-function handleVariableDeclaration(code,env){
-    for (let i=0; i<code.declarations.length; i++){
-        env=func[code.declarations[i].type](code.declarations[i],env);
-    }
-    return env;
-}
-
-function handleReturnStatement(code,env){
-    let retVal=val[code.argument.type](code.argument,env);
-    newCode.push(createCodeLine('return '+retVal+' ;',0));
-    return env;
-}
-
-function literalAssignmentExpression (code,env){
-    if (escodegen.generate(code.left) in argEnv){
-        let right=val[code.right.type](code.right,env);
-        newCode.push(createCodeLine(escodegen.generate(code.left)+ code.operator + right+';',0));
+function addCondEdge(){
+    if (currentName.partOfCond)
+    {
+        graph=graph+beforeName.name+'(yes)->'+currentName.name+'\n';
     }
     else{
-        let right=val[code.right.type](code.right,env);
-        env[escodegen.generate(code.left)]=right;
+        graph=graph+beforeName.name+'(no)->'+currentName.name+'\n';
     }
-    return env;
+}
+
+function addCuurentNode(){
+    if(currentName.isPass){
+        graph=graph+currentName.name+'=>'+currentStr+'|right-path\n';
+    }
+    else{
+        graph=graph+currentName.name+'=>'+currentStr+'\n';
+    }
+    if (beforeName.name!=='temp'){
+        if (beforeName.isCond){
+            addCondEdge();
+        }
+        else{
+            graph=graph+beforeName.name+'->'+currentName.name+'\n';
+        }
+    }
+}
+
+function reset(){
+    graph='';
+    indexName=1;
+    index=0;
+    currentStr='';
+    currentName=null;
+    beforeName=createVertex('temp',true,false,false);
+}
+
+function makeGraph(myCode,input) {
+    let code = parseCode(myCode);
+    code=code.body[0];
+    let env=makeInputArray(input,code.params);
+    reset();
+
+    func[code.body.type](code.body,env);
+    return graph;
+
+}
+
+function handleBlockStatement(code,env){
+    for (let i=0; i<code.body.length; i++){
+        func[code.body[i].type](code.body[i],env);
+    }
+}
+
+function handleVariableDeclaration(code,env){
+    if (currentStr===''){
+        currentName=createVertex('a'+index,beforeName.isPass,false,beforeName.partOfCond);
+        currentStr='operation: -'+indexName+'-\n';
+        index++; indexName++;
+    }
+    let str=escodegen.generate(code).replace(/\n/g,'');
+    currentStr=currentStr+str.substr(4,str.length -5)+'\n';
+    for (let i=0; i<code.declarations.length; i++){
+        handleVariableDeclarator(code.declarations[i],env);
+    }
+}
+
+function handleVariableDeclarator(code,env){
+    if (code.init==null) {
+        env[escodegen.generate(code.id).replace(/\n/g,'')] = null;
+    }
+    else {
+        env[escodegen.generate(code.id).replace(/\n/g,'')]=val[code.init.type](code.init, env);
+    }
+}
+
+function handleExpressionStatement(code,env){
+    func[code.expression.type](code.expression,env);
+}
+
+function handleAssignmentExpression(code, env){
+    if (currentStr===''){
+        currentName=createVertex('a'+index,beforeName.isPass,false,beforeName.partOfCond);
+        currentStr='operation: -'+indexName+'-\n';
+        index++; indexName++;
+    }
+    let str=escodegen.generate(code).replace(/\n/g,'');
+    str.replace('\n','');
+    currentStr=currentStr+str+'\n';
+    updateEnv(code,env);
+}
+
+function updateEnv(code,env){
+    if (code.left.type ==='MemberExpression'){
+        updateEnvMemberExp(code,env);
+    }
+    else{
+        let left=escodegen.generate(code.left).replace(/\n/g,'');
+        let right= val[code.right.type](code.right,env);
+        env[left]=right;
+    }
+}
+
+function updateEnvMemberExp(code,env){
+    let loc=val[code.left.property.type](code.left.property,env);
+    let right=val[code.right.type](code.right,env);
+    let locValue=eval(loc);
+    updateArrayInEnv(escodegen.generate(code.left.object).replace(/\n/g,''),locValue,env,right);
 }
 
 function updateArrayInEnv(arrayName,loc,env,newVal){
@@ -141,129 +162,183 @@ function updateArrayInEnv(arrayName,loc,env,newVal){
     let ans='[';
     for (let i=0; i<array.length; i++){
         if (i!==loc){
-            ans=ans+escodegen.generate(array[i])+',';
+            ans=ans+escodegen.generate(array[i]).replace(/\n/g,'')+',';
         }
         else ans=ans+newVal+',';
     }
     ans=ans.substr(0,ans.length-1)+']';
     env[arrayName]=ans;
-    return env;
 }
 
-function arrayAssignmentExpressionElse(code,env){
-    let loc=val[code.left.property.type](code.left.property,env);
-    let right=val[code.right.type](code.right,env);
-    try {
-        let locValue=eval(loc);
-        env=updateArrayInEnv(escodegen.generate(code.left.object),locValue,env,right);
-        return env;
+function handleReturnStatement(code){
+    if (currentStr!==''){
+        addCuurentNode();
+        beforeName=currentName;
     }
-    catch (e) {
-        newCode.push(createCodeLine(escodegen.generate(code.left.object)+'['+loc +']'+ code.operator + right+';',0));
-        let locValue=getFullVal(loc);
-        env=updateArrayInEnv(escodegen.generate(code.left.object),locValue,env,right);
-        return env;
+    currentName=createVertex('a'+index,beforeName.isPass,false,beforeName.partOfCond);
+    let str=escodegen.generate(code).replace(/\n/g,'');
+    currentStr='operation: -'+indexName+'-\n'+str+'\n';
+    index++;
+    indexName++;
+    addCuurentNode();
+}
+
+function handleIfStatement(code,env){
+    let testVal = eval(val [code.test.type](code.test,env));
+    if (currentStr!==''){ // create the before node if exist
+        addCuurentNode();
+        beforeName=currentName;
     }
+    currentName=createVertex('a'+index,beforeName.isPass,true,beforeName.partOfCond); // create the if node
+    let ifPassOrigin=currentName.isPass; let ifNode=currentName; index++;
+    //current node is if cond
+    let str=escodegen.generate(code.test).replace(/\n/g,'');
+    currentStr='condition: -'+indexName+'-\n'+str+'\n';
+    indexName++; addCuurentNode();
+    beforeName=currentName; //before node is if
+    currentStr='';
+    //befor is if cond, current not define
+    let endIfNode=createVertex('a'+index,beforeName.isPass ,false,true); //create the node of end if
+    index++; let afterIfEnv=null;
+    ifContinu1(code,env,ifNode,afterIfEnv,testVal,ifPassOrigin,endIfNode);
 }
 
-function getFullVal(str){
-    let json=parseCode(str).body[0].expression;
-    let update=val[json.type](json,argEnv)+'';
-    return eval(update);
+function ifContinu1(code,env,ifNode,afterIfEnv,testVal,ifPassOrigin,endIfNode){
+    let ifEnv=Object.assign({}, env); //backup the env.
+    ifNode.partOfCond=true; ifNode.isPass= ifPassOrigin && testVal;
+    let Tside=handleIfconsequent(code,ifEnv);
+    //beforeName=currentName;
+    if (testVal) afterIfEnv=ifEnv;
+    beforeName=ifNode; currentStr=''; ifEnv=Object.assign({}, env);
+    ifContinu2(code,env,ifNode,ifPassOrigin,testVal,ifEnv,endIfNode,Tside);
+    if (afterIfEnv==null) afterIfEnv=ifEnv;
+    env=Object.assign(env, afterIfEnv);
+    beforeName=currentName; currentStr='';
 }
 
-function arrayAssignmentExpression (code, env){
-    if (escodegen.generate(code.left.object) in argEnv){
-        let loc=val[code.left.property.type](code.left.property,env);
-        let right=val[code.right.type](code.right,env);
-        newCode.push(createCodeLine(escodegen.generate(code.left.object)+'['+loc +']'+ code.operator + right+';',0));
-        let locValue=getFullVal(loc+'');
-        let newVal=getFullVal(right+'');
-        updateArrayInEnv(escodegen.generate(code.left.object),locValue,argEnv,newVal);
+function ifContinu2(code,env,ifNode,ifPassOrigin,testVal,ifEnv,endIfNode,Tside){
+    if (code.alternate!=null){
+        ifNode.partOfCond=false; ifNode.isPass= ifPassOrigin && (!testVal);
+        handleIfAlternate(code,ifEnv,endIfNode,Tside);
     }
     else{
-        env=arrayAssignmentExpressionElse(code,env);
+        currentName=endIfNode;
+        currentStr='start: null\n';
+        beforeName=Tside;
+        endIfNode.partOfCond=beforeName.partOfCond;
+        addCuurentNode();
+        graph=graph+ifNode.name+'(no)->'+currentName.name+'\n';
     }
-    return env;
 }
 
-function handleAssignmentExpression(code, env){
-    if (code.left.type === 'MemberExpression'){
-        return arrayAssignmentExpression(code,env);
+function handleIfconsequent(code,ifEnv){
+    func[code.consequent.type](code.consequent,ifEnv); //handle the if consequent
+    //current is the last node of T part of if
+    if (currentStr!==''){
+        addCuurentNode();
     }
-    else return literalAssignmentExpression(code,env);
+
+    return currentName;
 }
 
-function handleExpressionStatement(code,env){
-    return func[code.expression.type](code.expression,env);
-}
-
-function handleVariableDeclarator(code, env){
-    if (code.init==null) {
-        env[escodegen.generate(code.id)] = null;
+function handleIfAlternate(code,ifEnv,endIfNode,Tside){
+    func[code.alternate.type](code.alternate,ifEnv);
+    let Fside=currentName;
+    if (currentStr!==''){ // create the before node if exist
+        addCuurentNode();
     }
-    else {
-        env[escodegen.generate(code.id)]=val[code.init.type](code.init, env);
+    currentName=endIfNode; currentStr='start: null\n'; beforeName=Fside;
+    endIfNode.partOfCond=beforeName.partOfCond;
+    addCuurentNode();
+    beforeName=Tside; endIfNode.partOfCond=beforeName.partOfCond;
+    if (beforeName.isCond){
+        addCondEdge();
     }
-    return env;
-}
-
-function updateEnv(oldEnv,newEnv){
-    for (let key in oldEnv) {
-        if ((key in newEnv) && (oldEnv[key]!==newEnv[key])){
-            oldEnv[key]=null;
-        }
+    else{
+        graph=graph+beforeName.name+'->'+currentName.name+'\n';
     }
-    return oldEnv;
-}
-
-function getColor(test){
-    calcParam=true;
-    let jsonTest=parseCode(test).body[0].expression;
-    let updateTest=val[jsonTest.type](jsonTest,argEnv);
-    calcParam=false;
-    if (eval(updateTest)){
-        return 1; //green
-    }
-    else return 2; //red
-}
-
-function handleIfStatement(code, env){
-    let testVal = val [code.test.type](code.test,env);
-    envIfNeed=env;
-    let color= getColor(testVal);
-    envIfNeed=null;
-    newCode.push(createCodeLine('if ('+testVal+')',color));
-    let ifEnv=Object.assign({}, env);
-    let argIfEnv=Object.assign({}, argEnv);
-    func[code.consequent.type](code.consequent,ifEnv);
-    argEnv=argIfEnv;
-    if (code.alternate!=null){
-        handleElse(code,env);
-    }
-    env=updateEnv(env,ifEnv);
-    return env;
-}
-
-function handleElse(code,env){
-    let argIfEnv=Object.assign({}, argEnv);
-    newCode.push(createCodeLine('else ',0));
-    let elseEnv=Object.assign({}, env);
-    func[code.alternate.type](code.alternate,elseEnv);
-    env=updateEnv(env,elseEnv);
-    argEnv=argIfEnv;
 }
 
 function handleWhileStatement(code,env){
-    let testVal = val [code.test.type](code.test,env);
-    newCode.push(createCodeLine('while ('+testVal+')',0));
-    let whileEnv=Object.assign({}, env);
-    func[code.body.type](code.body,whileEnv);
+    let testVal = eval(val [code.test.type](code.test,env));
+    if (currentStr!==''){ // create the before node if exist
+        addCuurentNode();
+        beforeName=currentName;
+    }
+    currentName=createVertex('a'+index,beforeName.isPass,false,beforeName.partOfCond); // create the null vertex
+    index++;
+    currentStr='start: null\n';
+    addCuurentNode();
+    beforeName=currentName;
+
+    let whileNullVertex=currentName;
+    handleWhile1(code,env,testVal,whileNullVertex);
+}
+
+function handleWhile1(code,env,testVal,whileNullVertex){
+    currentName=createVertex('a'+index,beforeName.isPass,true,beforeName.partOfCond); // create the while node
+    let whilePassOrigin=currentName.isPass;
+    let whileNode=currentName;
+    index++; let str=escodegen.generate(code.test).replace(/\n/g,'');
+    currentStr='condition: -'+indexName+'-\n'+str+'\n';
+    indexName++;
+    addCuurentNode();
+    beforeName=currentName;
+    currentStr='';
+    handleWhile2(code,env,whileNode,whilePassOrigin,testVal,whileNullVertex);
+
+}
+function handleWhile2(code,env,whileNode,whilePassOrigin,testVal,whileNullVertex){
+    let whileEnv=Object.assign({}, env); //backup the env.
+    whileNode.partOfCond=true;
+    whileNode.isPass= whilePassOrigin && testVal;
+    handlewhileT(code,whileEnv);
+    if (testVal) env=Object.assign(env, whileEnv);
+    //current is the end of body node.
+    beforeName=currentName; currentName=whileNullVertex;
+    if (beforeName.isCond){
+        addCondEdge();
+    }
+    else{
+        graph=graph+beforeName.name+'->'+currentName.name+'\n';
+    }
+    whileNode.partOfCond=false; whileNode.isPass= whilePassOrigin;
+    whileNode.isCond=true;
+    currentName=whileNode;
+    beforeName=currentName;
+    currentStr='';
+}
+
+
+function handlewhileT(code, env){
+    func[code.body.type](code.body,env); //handle while body
+    if (currentStr!==''){
+        addCuurentNode();
+    }
+}
+
+function makeInputArray(input,params){
+    let env={};
+    if (input!=='') {
+        let values = parseCode(input).body[0].expression;
+        if (values.type === 'SequenceExpression'){
+            let array = values.expressions;
+            for (let i = 0; i < array.length; i++) {
+                let str=escodegen.generate(array[i]).replace(/\n/g,'');
+                env[params[i].name]=str;
+            }
+        }
+        else{
+            let str=escodegen.generate(values).replace(/\n/g,'');
+            env[params[0].name]=str;
+        }
+    }
     return env;
 }
-/////////////////////////////////////////////////////////////////////
+
+/* val calc*/
 function handleLiteralVal(code){
-    return escodegen.generate(code);
+    return escodegen.generate(code).replace(/\n/g,'');
 }
 
 function handleUnaryExpression (code,env){
@@ -271,25 +346,22 @@ function handleUnaryExpression (code,env){
 }
 
 function handleIdentifierVal(code, env){
-    if (calcParam)
-        return env[code.name];
-    if  ((code.name in env)&& env[code.name]!=null){
-        return env[code.name];
-    }
-    return code.name;
+    //return 1;
+    return env[escodegen.generate(code).replace(/\n/g,'')];
 }
 
 function handleLogicalExpression(code,env){
     let left = val[code.left.type](code.left,env);
     let right = val[code.right.type](code.right,env);
-    let ans=escodegen.generate(parseCode('('+left+')' + code.operator + '(' + right +')'));
+    let ans=escodegen.generate(parseCode('('+left+')' + code.operator + '(' + right +')')).replace(/\n/g,'');
     return ans.substr(0,ans.length-1);
 }
 
 function handleBinaryExpressionVal(code,env){
     let left = val[code.left.type](code.left,env);
     let right = val[code.right.type](code.right,env);
-    let ans=escodegen.generate(parseCode('('+left+')' + code.operator + '(' + right +')'));
+
+    let ans=escodegen.generate(parseCode('('+left+')' + code.operator + '(' + right +')')).replace(/\n/g,'');
     return ans.substr(0,ans.length-1);
 }
 
@@ -304,46 +376,13 @@ function handleArrayExpressionVal(code,env){
 
 function getArrayInLoc(arrayName,loc,env){
     let array=parseCode(env[arrayName]).body[0].expression.elements;
-    return escodegen.generate(array[loc]);
-}
-
-function handleMemberExpressionValArrayParam(code,env){
-    if (calcParam){
-        let indexStr= val[code.property.type](code.property,env);
-        let arrayName=escodegen.generate(code.object);
-        return getArrayInLoc(arrayName,indexStr,env);
-    }
-    else{
-        let indexStr= val[code.property.type](code.property,env);
-        return escodegen.generate(code.object)+'['+indexStr+']';
-    }
-}
-
-function handleMemberExpressionValArrayNotParam(code,env){
-    try{ // if can calc index
-        let indexStr= val[code.property.type](code.property,env);
-        let index=eval(indexStr);
-        let arrayName=escodegen.generate(code.object);
-        return getArrayInLoc(arrayName,index,env);
-    }
-    catch (e) {
-        let indexStr= val[code.property.type](code.property,env);
-        if (calcParam){
-            let arrayName=escodegen.generate(code.object);
-            return getArrayInLoc(arrayName,indexStr,envIfNeed);
-        }
-        else
-            return escodegen.generate(code.object)+'['+indexStr+']';
-    }
+    return escodegen.generate(array[loc]).replace(/\n/g,'');
 }
 
 function handleMemberExpressionVal(code,env){
-    //array is param
-    if (escodegen.generate(code.object) in argEnv){
-        return handleMemberExpressionValArrayParam(code,env);
-    }
-    //array not Param
-    else{
-        return handleMemberExpressionValArrayNotParam(code,env);
-    }
+    let indexStr= val[code.property.type](code.property,env);
+    let index=eval(indexStr);
+    let arrayName=escodegen.generate(code.object).replace(/\n/g,'');
+    return getArrayInLoc(arrayName,index,env);
 }
+
